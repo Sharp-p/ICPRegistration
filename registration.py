@@ -5,27 +5,29 @@ import copy
 def main() -> None:
     # TODO: get an option from input to see if it uses demos from o3d or take input files
     # TODO: input files formating and saving as .pts
+    threshold = 0.2
+
     voxel_size = 0.05  # means 5cm for this dataset
-    source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_dataset(
+    source, target, source_down, target_down, source_fpfh, target_fpfh, trans_init = prepare_dataset(
         voxel_size)
 
-    threshold = 0.2
-    # TODO: with the initial transformation obtained from a global registratio
-    trans_init = np.asarray([[0.862, 0.011, -0.507, 0.5],
-                             [-0.139, 0.967, -0.215, 0.7],
-                             [0.487, 0.255, 0.835, -1.4], [0.0, 0.0, 0.0, 1.0]])
+    print("Initial alignment")
+    print("Threshold={}:".format(threshold))
+    evaluation = o3d.pipelines.registration.evaluate_registration(
+        source, target, threshold, trans_init)
+    print(evaluation)
+
+    result_ransac = execute_global_registration(source_down, target_down,
+                                                source_fpfh, target_fpfh,
+                                                voxel_size)
+    print(result_ransac)
+    draw_registration_result(source_down, target_down, result_ransac.transformation)
 
     # TODO: switch between noisy and normal data
     mu, sigma = 0, 0.1  # mean and standard deviation
-    source_noisy = apply_noise(source, mu, sigma)
+    source_noisy = source
 
-    print("Initial alignment")
-    print("Robust point-to-plane ICP, threshold={}:".format(threshold))
-    evaluation = o3d.pipelines.registration.evaluate_registration(
-        source_noisy, target, threshold, trans_init)
-    print(evaluation)
-
-    draw_registration_result(source_noisy, target, trans_init)
+    #apply_noise(source, mu, sigma))
 
     # TODO: switch between point to point and point to plane
     print("Apply point-to-point ICP")
@@ -35,7 +37,7 @@ def main() -> None:
 
     tf_est = o3d.pipelines.registration.TransformationEstimationPointToPlane(loss)
     reg_p2p = o3d.pipelines.registration.registration_icp(
-        source_noisy, target, threshold, trans_init, tf_est)
+        source_noisy, target, threshold, result_ransac.transformation, tf_est)
 
     print(reg_p2p)
     print("Transformation is:")
@@ -91,10 +93,25 @@ def prepare_dataset(voxel_size):
 
     source_down, source_fpfh = preprocess_point_cloud(source, voxel_size)
     target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
-    return source, target, source_down, target_down, source_fpfh, target_fpfh
+    return source, target, source_down, target_down, source_fpfh, target_fpfh, trans_init
 
-#main()
+def execute_global_registration(source_down, target_down, source_fpfh,
+                                target_fpfh, voxel_size):
+    distance_threshold = voxel_size * 1.5
+    print(":: RANSAC registration on downsampled point clouds.")
+    print("   Since the downsampling voxel size is %.3f," % voxel_size)
+    print("   we use a liberal distance threshold %.3f." % distance_threshold)
+    result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+        source_down, target_down, source_fpfh, target_fpfh, True,
+        distance_threshold,
+        o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+        3, [
+            o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(
+                0.9),
+            o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(
+                distance_threshold)
+        ], o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
+    return result
 
-voxel_size = 0.05  # means 5cm for this dataset
-source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_dataset(
-    voxel_size)
+main()
+
