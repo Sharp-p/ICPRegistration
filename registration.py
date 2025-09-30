@@ -1,9 +1,22 @@
+import os
 import open3d as o3d
 import numpy as np
 import copy
+import sys
 
 def main() -> None:
-    # TODO: get an option from input to see if it uses demos from o3d or take input files
+    if len(sys.argv) != 3 and len(sys.argv) != 1:
+        print("[ERROR]: correct usage:\t python registration.py <path-to-2dPointCloudTarget.pts> <path-to-2dPointCloudSource\n"
+              "or to use predefined 3d Data-Set:\t python registration.py")
+        exit(1)
+    print(sys.argv)
+
+    dataset = False
+    if len(sys.argv) != 3: dataset = True
+    target_path = os.sep.join(sys.argv[1])
+
+
+    # TODO: using sys.argv get an option from input to see if it uses demos from o3d or take input files
     # TODO: input files formating and saving as .pts
     threshold = 0.2
 
@@ -113,5 +126,6 @@ def execute_global_registration(source_down, target_down, source_fpfh,
         ], o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
     return result
 
-main()
+if __name__ == "__main__":
+    main()
 
