@@ -3,7 +3,7 @@ import open3d as o3d
 import numpy as np
 import copy
 import sys
-import csv
+from pathlib import Path
 
 def main() -> None:
     if len(sys.argv) != 3 and len(sys.argv) != 1:
@@ -21,19 +21,20 @@ def main() -> None:
         target_path = sys.argv[1]
         source_path = sys.argv[2]
 
+    src_path = ''
+    trg_path = ''
     if not use_dataset and os.path.exists(target_path) and os.path.exists(source_path):
-        generate_pts(target_path, source_path)
+        src_path, trg_path = generate_pts(target_path, source_path)
+    else:
+        use_dataset = True
+        print("[WARNING]: using dataset")
 
-
-
-    # TODO: using sys.argv get an option from input to see if it uses demos from o3d or take input files
-    # TODO: input files formating and saving as .pts
-    threshold = 0.2
+    threshold = 1
 
     voxel_size = 0.05  # means 5cm for this dataset
     #generate the down sampled point clouds for the RANSAC algorithm
     source, target, source_down, target_down, source_fpfh, target_fpfh, trans_init = prepare_dataset(
-        voxel_size, use_dataset)
+        voxel_size, src_path, trg_path, use_dataset)
 
     print("Initial alignment")
     print("Threshold={}:".format(threshold))
@@ -41,11 +42,11 @@ def main() -> None:
         source, target, threshold, trans_init)
     print(evaluation)
 
-    result_ransac = execute_global_registration(source_down, target_down,
-                                                source_fpfh, target_fpfh,
-                                                voxel_size)
-    print(result_ransac)
-    draw_registration_result(source_down, target_down, result_ransac.transformation)
+    #result_ransac = execute_global_registration(source_down, target_down,
+    #                                            source_fpfh, target_fpfh,
+    #                                            voxel_size)
+    #print(result_ransac)
+    #draw_registration_result(source_down, target_down, result_ransac.transformation)
 
     # TODO: switch between noisy and normal data
     mu, sigma = 0, 0.1  # mean and standard deviation
@@ -58,20 +59,42 @@ def main() -> None:
     # k should match the standard deviation of the noise model of the input datas (obviously not easy with real world data)
     loss = o3d.pipelines.registration.TukeyLoss(k=sigma)
     print("Using robust loss:", loss)
-
-    tf_est = o3d.pipelines.registration.TransformationEstimationPointToPlane(loss)
+    # alternative use point to place
+    # TODO: switch between point to plane and point to point
+    tf_est = o3d.pipelines.registration.TransformationEstimationPointToPoint()
     reg_p2p = o3d.pipelines.registration.registration_icp(
-        source_noisy, target, threshold, result_ransac.transformation, tf_est)
+        source_noisy, target, threshold, trans_init, tf_est)
 
     print(reg_p2p)
     print("Transformation is:")
     print(reg_p2p.transformation)
     draw_registration_result(source, target, reg_p2p.transformation)
 
-def generate_pts(target_path, source_path) -> None:
-    with open(target_path, 'rb') as csvfile:
-        reader = csv.reader(csvfile, delimiter=',')
-        with open()
+def generate_pts(target_path, source_path) -> (str, str):
+    src_path = parse_csv(source_path)
+    trg_path = parse_csv(target_path)
+    return src_path, trg_path
+
+def parse_csv(path_csv: str) -> str:
+    # this will break if you change the position of this file
+    root = Path(__file__).parent
+    split_csv = path_csv.split(os.sep)
+    pts_path = os.path.join(root, 'data', f'{split_csv[-1][:-4]}.xyz')
+
+    with open(path_csv) as csv_file:
+        lines = csv_file.readlines()
+
+        with open(pts_path, 'w') as pts_file:
+            i = 0
+            for row in lines:
+                split_row = row.split(',')
+                if i == 0:
+                    i += 1
+                    continue
+                pts_file.write(f'{split_row[2]} {split_row[3][:-2]} 0\n')
+                i += 1
+    return pts_path
+
 
 def draw_registration_result(source, target, transformation) -> None:
     source_temp = copy.deepcopy(source)
@@ -108,12 +131,24 @@ def preprocess_point_cloud(pcd, voxel_size):
         o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
     return pcd_down, pcd_fpfh
 
-def prepare_dataset(voxel_size, use_dataset):
+def prepare_dataset(voxel_size, src_path, trg_path, use_dataset):
     print(":: Load two point clouds and disturb initial pose.")
+    # if path setted reads from local data
+    if not use_dataset:
+        source = o3d.io.read_point_cloud(src_path)
+        target = o3d.io.read_point_cloud(trg_path)
+        #source.estimate_normals(
+            #search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+        #target.estimate_normals(
+            #search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
 
-    demo_icp_pcds = o3d.data.DemoICPPointClouds()
-    source = o3d.io.read_point_cloud(demo_icp_pcds.paths[0])
-    target = o3d.io.read_point_cloud(demo_icp_pcds.paths[1])
+        print(source)
+        print(target)
+    else:
+        demo_icp_pcds = o3d.data.DemoICPPointClouds()
+        source = o3d.io.read_point_cloud(demo_icp_pcds.paths[0])
+        target = o3d.io.read_point_cloud(demo_icp_pcds.paths[1])
+
     trans_init = np.asarray([[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0],
                              [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
     source.transform(trans_init)
