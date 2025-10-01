@@ -3,6 +3,7 @@ import open3d as o3d
 import numpy as np
 import copy
 import sys
+import csv
 
 def main() -> None:
     if len(sys.argv) != 3 and len(sys.argv) != 1:
@@ -11,9 +12,18 @@ def main() -> None:
         exit(1)
     print(sys.argv)
 
-    dataset = False
-    if len(sys.argv) != 3: dataset = True
-    target_path = os.sep.join(sys.argv[1])
+    target_path = ''
+    source_path = ''
+
+    use_dataset = False
+    if len(sys.argv) != 3: use_dataset = True
+    else:
+        target_path = sys.argv[1]
+        source_path = sys.argv[2]
+
+    if not use_dataset and os.path.exists(target_path) and os.path.exists(source_path):
+        generate_pts(target_path, source_path)
+
 
 
     # TODO: using sys.argv get an option from input to see if it uses demos from o3d or take input files
@@ -21,8 +31,9 @@ def main() -> None:
     threshold = 0.2
 
     voxel_size = 0.05  # means 5cm for this dataset
+    #generate the down sampled point clouds for the RANSAC algorithm
     source, target, source_down, target_down, source_fpfh, target_fpfh, trans_init = prepare_dataset(
-        voxel_size)
+        voxel_size, use_dataset)
 
     print("Initial alignment")
     print("Threshold={}:".format(threshold))
@@ -57,6 +68,10 @@ def main() -> None:
     print(reg_p2p.transformation)
     draw_registration_result(source, target, reg_p2p.transformation)
 
+def generate_pts(target_path, source_path) -> None:
+    with open(target_path, 'rb') as csvfile:
+        reader = csv.reader(csvfile, delimiter=',')
+        with open()
 
 def draw_registration_result(source, target, transformation) -> None:
     source_temp = copy.deepcopy(source)
@@ -93,7 +108,7 @@ def preprocess_point_cloud(pcd, voxel_size):
         o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
     return pcd_down, pcd_fpfh
 
-def prepare_dataset(voxel_size):
+def prepare_dataset(voxel_size, use_dataset):
     print(":: Load two point clouds and disturb initial pose.")
 
     demo_icp_pcds = o3d.data.DemoICPPointClouds()
