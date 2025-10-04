@@ -29,14 +29,14 @@ def main() -> None:
         use_dataset = True
         print("[WARNING]: using dataset")
 
-    threshold = 20 # in cm for ultrasound
+    threshold = 15 # in cm for ultrasound
 
     voxel_size = 0.05  # means 5cm for the dataset
-    #generate the down sampled point clouds for the RANSAC algorithm
+    # generate the down sampled point clouds for the RANSAC algorithm
     source, target, source_down, target_down, source_fpfh, target_fpfh, trans_init = prepare_dataset(
-        threshold, src_path, trg_path, use_dataset)
+        threshold, src_path, trg_path, use_dataset, threshold)
 
-    print("Initial alignment")
+    #print("Initial alignment")
     print("Threshold={}:".format(threshold))
     evaluation = o3d.pipelines.registration.evaluate_registration(
         source, target, threshold, trans_init)
@@ -58,7 +58,7 @@ def main() -> None:
     #apply_noise(source, mu, sigma))
 
     # TODO: switch between point to point and point to plane
-    print("Apply point-to-point ICP")
+    #print("Apply point-to-point ICP")
     # k should match the standard deviation of the noise model of the input datas (obviously not easy with real world data)
     #loss = o3d.pipelines.registration.TukeyLoss(k=sigma)
     #print("Using robust loss:", loss)
@@ -73,8 +73,8 @@ def main() -> None:
     print("Transformation is:")
     print(reg_p2p.transformation)
 
-    source = add_origin(source, [1, 0, 0])
-    target = add_origin(target, [0, 0, 1])
+    source = add_origin(source, trans_init, [1, 0, 0])
+    target = add_origin(target, np.identity(4), [0, 0, 1])
 
     draw_registration_result(source, target, reg_p2p.transformation, True)
 
@@ -103,9 +103,11 @@ def parse_csv(path_csv: str) -> str:
                 i += 1
     return pts_path
 
-def add_origin(pcd, color=[1, 0, 0]) -> o3d.geometry.PointCloud:
+def add_origin(pcd, trans_init, color=[1, 0, 0]) -> o3d.geometry.PointCloud:
     points = np.asarray(pcd.points)
-    new_point = np.array([[0.0, 0.0, 0.0]])
+    new_point = np.array([[trans_init[0][-1],
+                            trans_init[1][-1],
+                            trans_init[2][-1]]])
     points = np.vstack((points, new_point))
     pcd.points = o3d.utility.Vector3dVector(points)
 
@@ -172,23 +174,23 @@ def apply_noise(pcd, mu, sigma):
     return noisy_pcd
 
 def preprocess_point_cloud(pcd, voxel_size):
-    print(":: Downsample with a voxel size %.3f." % voxel_size)
+    #print(":: Downsample with a voxel size %.3f." % voxel_size)
     pcd_down = pcd.voxel_down_sample(voxel_size)
 
     radius_normal = voxel_size * 2
-    print(":: Estimate normal with search radius %.3f." % radius_normal)
+    #print(":: Estimate normal with search radius %.3f." % radius_normal)
     pcd_down.estimate_normals(
         o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
 
     radius_feature = voxel_size * 5
-    print(":: Compute FPFH feature with search radius %.3f." % radius_feature)
+    #print(":: Compute FPFH feature with search radius %.3f." % radius_feature)
     pcd_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
         pcd_down,
         o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=30))
     return pcd_down, pcd_fpfh
 
-def prepare_dataset(voxel_size, src_path, trg_path, use_dataset):
-    print(":: Load two point clouds and disturb initial pose.")
+def prepare_dataset(voxel_size, src_path, trg_path, use_dataset, threshold):
+    #print(":: Load two point clouds and disturb initial pose.")
     # if path setted reads from local data
     if not use_dataset:
         source = o3d.io.read_point_cloud(src_path)
@@ -209,8 +211,15 @@ def prepare_dataset(voxel_size, src_path, trg_path, use_dataset):
     source.paint_uniform_color([1, 0.706, 0])
     target.paint_uniform_color([0, 0.651, 0.929])
 
-    trans_init = np.asarray([[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0],
-                             [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    # random angle rotation on the same plane
+    theta = np.random.uniform(0, 2 * np.pi)
+    distance_x = np.random.uniform(-1, 1) * threshold
+    distance_y = np.random.uniform(-1, 1) * threshold
+    # use distance on axis for future test
+    trans_init = np.asarray([[np.cos(theta), -np.sin(theta), 0.0, 0.0],
+                            [np.sin(theta),  np.cos(theta), 0.0, 0.0],
+                            [0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0]])
     source.transform(trans_init)
     draw_registration_result(source, target, trans_init)
 
